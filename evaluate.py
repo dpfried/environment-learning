@@ -5,14 +5,17 @@ import sys
 import pretrain
 import model as our_model
 import baseline_model
+import linear_model
 import dataset
 
 from absl import flags
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('baseline', False, 'use baseline model')
+flags.DEFINE_bool('linear', False, 'use linear model')
 flags.DEFINE_bool('batch', False, 'use batch evaluation (only supported with some datasets)')
 flags.DEFINE_bool('batch_increasing', False, 'use batch evaluation with larger and larger data sizes')
 flags.DEFINE_string('correctness_log', None, 'file to write log indicating which predictions were correct')
+flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactivce debugging)')
 
 def evaluate():
     total_correct = 0
@@ -84,17 +87,21 @@ if __name__ == '__main__':
     print(sys.argv)
     FLAGS(sys.argv)
     dataset.load()
-    if FLAGS.baseline:
-        Model = baseline_model.Model
-    else:
-        if not pretrain.saved_model_exists():
-            print('No pretrained model found with prefix "%s"; running pretraining' % FLAGS.pretrain_prefix)
-            pretrain.train()
-        Model = our_model.Model
+    if not FLAGS.sandbox:
+        if FLAGS.linear:
+            Model = linear_model.Model
+            assert not FLAGS.baseline
+        elif FLAGS.baseline:
+            Model = baseline_model.Model
+        else:
+            if not pretrain.saved_model_exists():
+                print('No pretrained model found with prefix "%s"; running pretraining' % FLAGS.pretrain_prefix)
+                pretrain.train()
+            Model = our_model.Model
 
-    if FLAGS.batch_increasing:
-        evaluate_batch_increasing()
-    elif FLAGS.batch:
-        evaluate_batch(100)
-    else:
-        evaluate()
+        if FLAGS.batch_increasing:
+            evaluate_batch_increasing()
+        elif FLAGS.batch:
+            evaluate_batch(100)
+        else:
+            evaluate()

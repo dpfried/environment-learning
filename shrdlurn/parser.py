@@ -3,9 +3,13 @@ from collections import namedtuple
 import itertools
 import heapq
 import random
-
+from vocabulary import Index
 from shrdlurn.levels import get_stacks_with_color, complement, leftmost, rightmost, stack_on_top, remove_top
 
+MAX_SIZE = 8
+MAX_FEATURE_DEPTH = 3
+
+FeaturizedLogicalForm = namedtuple("FeaturizedLogicalForm", ["logical_form", "features", "feature_ids"])
 _LogicalForm = namedtuple("_LogicalForm", "arguments")
 
 class LogicalForm(_LogicalForm):
@@ -34,10 +38,14 @@ class LogicalForm(_LogicalForm):
     def denotation(self, wall):
         raise NotImplementedError()
 
-    def featurize(self, depth):
+    def featurize(self, max_depth=MAX_FEATURE_DEPTH):
+        for depth in range(max_depth+1):
+            yield from self.featurize_single_depth(depth)
+
+    def featurize_single_depth(self, depth):
         yield from self.rec_featurize(depth)
         for arg in self.arguments:
-            yield from arg.featurize(depth)
+            yield from arg.featurize_single_depth(depth)
 
     def rec_featurize(self, depth):
         if depth == 0:
@@ -96,7 +104,7 @@ class Red(Color):
 
     @property
     def color_index(self):
-        raise 2
+        return 2
 
 class Orange(Color):
     @property
@@ -259,6 +267,27 @@ def build_all_beams(scoring_function, pruning_k, max_size=8):
         extend_beams(beams_by_size, new_size, scoring_function=scoring_function, pruning_k=pruning_k)
     return beams_by_size
 
+def executable(beams_by_size):
+    for size, beams in beams_by_size.items():
+        for return_type, candidates in beams.items():
+            if return_type == 'act':
+                yield from candidates
+
+# filtering doesn't actually seem necessary for efficiency
+# TODO: does it improve accuracy
+beams_by_size = build_all_beams(scoring_function=None, pruning_k=None, max_size=MAX_SIZE)
+EXECUTABLE_LOGICAL_FORMS: List[LogicalForm] = list(executable(beams_by_size))
+
+LOGICAL_FORM_FEATURE_INDEX = Index()
+FEATURIZED_LOGICAL_FORMS = []
+for lf in EXECUTABLE_LOGICAL_FORMS:
+    this_features = list(lf.featurize())
+    this_ids = []
+    for feature in this_features:
+        this_ids.append(LOGICAL_FORM_FEATURE_INDEX.index(feature))
+    FEATURIZED_LOGICAL_FORMS.append(FeaturizedLogicalForm(lf, this_features, this_ids))
+LOGICAL_FORM_FEATURE_INDEX.frozen = True
+
 if __name__ == "__main__":
     test = Add(
         Not(Leftmost(With(Brown()))),
@@ -268,7 +297,7 @@ if __name__ == "__main__":
 
     # for depth in range(4):
     #     print(f"max depth: {depth}")
-    #     for feat in test.featurize(depth):
+    #     for feat in test.featurize_single_depth(depth):
     #         print(feat)
     #     print()
 
@@ -277,9 +306,6 @@ if __name__ == "__main__":
     #     print(size)
     #     print(beams)
     #     print()
-
-    MAX_SIZE = 8
-    MAX_FEATURE_DEPTH = 3
     beams_by_size = {}
     features = set()
     # compute sizes and num features
@@ -292,7 +318,7 @@ if __name__ == "__main__":
             for cand in cands:
                 candidate_count += 1
                 for feature_depth in range(MAX_FEATURE_DEPTH + 1):
-                    features.update(cand.featurize(feature_depth))
+                    features.update(cand.featurize_single_depth(feature_depth))
         print(f"size {size}")
         print(f"candidates: {old_candidate_count} -> {candidate_count}")
         print(f"features: {old_feature_count} -> {len(features)}")
