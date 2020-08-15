@@ -38,7 +38,7 @@ def leftmost(wall, stack_idxs):
 def rightmost(wall, stack_idxs):
     if len(stack_idxs) == 0:
         return stack_idxs
-    return [min(stack_idxs)]
+    return [max(stack_idxs)]
 
 def can_remove(wall, stack_idxs):
     for i in stack_idxs:

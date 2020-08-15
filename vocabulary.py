@@ -59,13 +59,20 @@ class Vocabulary(object):
     def raw_features(self, language):
         # unigrams, bigrams, trigrams, skip-trigrams (from Wang et al.)
         tokens = self.raw_tokens(language)
-        yield from tokens
+        for token in tokens:
+            yield (token, )
         yield from zip(tokens, tokens[1:])
         yield from zip(tokens, tokens[1:], tokens[2:])
         yield from ((a, None, b) for a, b in zip(tokens, tokens[2:]))
 
     def feature_ids(self, language):
         return [self.feature_index.index(feat) for feat in self.raw_features(language)]
+
+    def split_feature_ids(self, language):
+        return [
+            (self.vocab_index.index(token) for token in tup if token is not None)
+            for tup in self.raw_features(language)
+        ]
 
     def token_ids(self, language):
         return [self.vocab_index.index(t) for t in self.raw_tokens(language)]

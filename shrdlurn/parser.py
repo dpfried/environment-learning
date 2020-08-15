@@ -1,4 +1,4 @@
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Tuple
 from collections import namedtuple
 import itertools
 import heapq
@@ -215,7 +215,7 @@ unaries_by_argument_type = {
     'act': [],
 }
 
-def beam_candidates(beams_by_size: Dict[int, Dict[str, List[LogicalForm]]],
+def beam_candidates(beams_by_size: Dict[int, Dict[str, List[Tuple[FeaturizedLogicalForm, float]]]],
                     new_size: int):
     if new_size == 1:
         yield from [All(), Cyan(), Brown(), Red(), Orange()]
@@ -223,8 +223,9 @@ def beam_candidates(beams_by_size: Dict[int, Dict[str, List[LogicalForm]]],
         assert new_size > max(beams_by_size.keys())
 
         # deal with unaries
-        for return_type, sub_trees in beams_by_size[new_size - 1].items():
-            for sub_tree in sub_trees:
+        for return_type, sub_trees_flf in beams_by_size[new_size - 1].items():
+            for sub_tree_flf, _ in sub_trees_flf:
+                sub_tree = sub_tree_flf.logical_form
                 for UnaryCls in unaries_by_argument_type[sub_tree.return_type]:
                     yield UnaryCls(sub_tree)
 
@@ -239,33 +240,38 @@ def beam_candidates(beams_by_size: Dict[int, Dict[str, List[LogicalForm]]],
                 continue
             beams_1 = beams_by_size[size_1]
             beams_2 = beams_by_size[size_2]
-            for set_arg, color_arg in itertools.chain(
-                itertools.product(beams_1['set'], beams_2['color']),
-                itertools.product(beams_2['set'], beams_1['color']),
+            for (set_arg_flf, _), (color_arg_flf, _) in itertools.chain(
+                itertools.product(beams_1['set'] + beams_1['set_not'] + beams_1['set_spatial'], beams_2['color']),
+                itertools.product(beams_2['set'] + beams_2['set_not'] + beams_2['set_spatial'], beams_1['color']),
             ):
-                yield Add(set_arg, color_arg)
+                yield Add(set_arg_flf.logical_form, color_arg_flf.logical_form)
 
-def extend_beams(beams_by_size: Dict[int, Dict[str, List[LogicalForm]]],
+def extend_beams(beams_by_size: Dict[int, Dict[str, List[Tuple[FeaturizedLogicalForm, float]]]],
                  new_size: int,
                  scoring_function=None,
                  pruning_k=None):
 
     candidates = beam_candidates(beams_by_size, new_size)
+    featurized_candidates = []
+    for lf in candidates:
+        this_features = list(lf.featurize())
+        this_ids = []
+        for feature in this_features:
+            this_ids.append(LOGICAL_FORM_FEATURE_INDEX.index(feature))
+        featurized_candidates.append(FeaturizedLogicalForm(lf, this_features, this_ids))
+
     if pruning_k is not None:
         assert scoring_function is not None
-        candidates = heapq.nlargest(pruning_k, candidates, key=scoring_function)
+        scored_candidates =[(feat_cand, scoring_function(feat_cand)) for feat_cand in featurized_candidates]
+        scored_candidates = heapq.nlargest(pruning_k, scored_candidates, key=lambda t: t[1])
+    else:
+        scored_candidates = [(feat_cand, 0.0) for feat_cand in featurized_candidates]
 
     grouped = {'set': [], 'color': [], 'act': [], 'set_spatial': [], 'set_not': []}
-    for cand in candidates:
-        grouped[cand.return_type].append(cand)
-        assert cand.size() == new_size
+    for cand, score in scored_candidates:
+        grouped[cand.logical_form.return_type].append((cand, score))
+        assert cand.logical_form.size() == new_size
     beams_by_size[new_size] = grouped
-
-def build_all_beams(scoring_function, pruning_k, max_size=8):
-    beams_by_size = {}
-    for new_size in range(1, max_size + 1):
-        extend_beams(beams_by_size, new_size, scoring_function=scoring_function, pruning_k=pruning_k)
-    return beams_by_size
 
 def executable(beams_by_size):
     for size, beams in beams_by_size.items():
@@ -273,19 +279,14 @@ def executable(beams_by_size):
             if return_type == 'act':
                 yield from candidates
 
-# filtering doesn't actually seem necessary for efficiency
-# TODO: does it improve accuracy
-beams_by_size = build_all_beams(scoring_function=None, pruning_k=None, max_size=MAX_SIZE)
-EXECUTABLE_LOGICAL_FORMS: List[LogicalForm] = list(executable(beams_by_size))
+def search_over_lfs(scoring_function, pruning_k, max_size=8):
+    beams_by_size = {}
+    for new_size in range(1, max_size + 1):
+        extend_beams(beams_by_size, new_size, scoring_function=scoring_function, pruning_k=pruning_k)
+    return executable(beams_by_size)
 
 LOGICAL_FORM_FEATURE_INDEX = Index()
-FEATURIZED_LOGICAL_FORMS = []
-for lf in EXECUTABLE_LOGICAL_FORMS:
-    this_features = list(lf.featurize())
-    this_ids = []
-    for feature in this_features:
-        this_ids.append(LOGICAL_FORM_FEATURE_INDEX.index(feature))
-    FEATURIZED_LOGICAL_FORMS.append(FeaturizedLogicalForm(lf, this_features, this_ids))
+FEATURIZED_LOGICAL_FORMS = list(search_over_lfs(None, None))
 LOGICAL_FORM_FEATURE_INDEX.frozen = True
 
 if __name__ == "__main__":

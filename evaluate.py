@@ -16,6 +16,7 @@ flags.DEFINE_bool('batch', False, 'use batch evaluation (only supported with som
 flags.DEFINE_bool('batch_increasing', False, 'use batch evaluation with larger and larger data sizes')
 flags.DEFINE_string('correctness_log', None, 'file to write log indicating which predictions were correct')
 flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactivce debugging)')
+flags.DEFINE_bool('verbose', False, 'print outputs')
 
 def evaluate():
     total_correct = 0
@@ -61,8 +62,9 @@ def evaluate_batch(data_size, test_size=500):
         for state, language, target_output in session_data[:data_size]:
             model.update(state, language, target_output, 0)
 
-        for i in range(50):
-            model.optimizer_step()
+        if not FLAGS.linear:
+            for i in range(50):
+                model.optimizer_step()
 
         print(' training accuracy: %s%%' % (100*model.training_accuracy()))
 
@@ -89,7 +91,7 @@ if __name__ == '__main__':
     dataset.load()
     if not FLAGS.sandbox:
         if FLAGS.linear:
-            Model = linear_model.Model
+            Model = linear_model.LinearModel
             assert not FLAGS.baseline
         elif FLAGS.baseline:
             Model = baseline_model.Model

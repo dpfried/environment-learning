@@ -19,7 +19,8 @@ from absl import flags
 FLAGS = flags.FLAGS
 # TODO: what value did Wang et al. use?
 flags.DEFINE_float('linear_lambda', 0.01, 'l1 penalty lambda')
-flags.DEFINE_integer('linear_max_updates', 50, 'max updates')
+flags.DEFINE_integer('linear_max_updates', 1, 'max updates')
+flags.DEFINE_integer('denotations_max_beam_size', 100, ' ')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -48,35 +49,15 @@ class Sparse2DLinear(nn.Module):
 class Model(object):
     def __init__(self):
         self.vocab = Vocabulary()
-        self.linear = Sparse2DLinear(
-            self.vocab.feature_index.size(),
-            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
-        ).to(device)
-
-        all_params = list(self.linear.parameters())
-        self.optimizer = optim.Adagrad(all_params)
+        self.init_parameters()
         self.training_examples = []
 
-        self.regularizer_lambda = FLAGS.linear_lambda
-
-    # -> List[LogicalForm, Counter[(vocab_feature_id: int, lf_feature_id: int)]
-    def cross_featurized_lfs(self, command):
-        command_feature_ids = self.vocab.feature_ids(command)
-        cross_featurized_lfs = []
-        for featurized_lf in dataset.FEATURIZED_LOGICAL_FORMS:
-            crossed_features = Counter(itertools.product(command_feature_ids, featurized_lf.feature_ids))
-            cross_featurized_lfs.append((featurized_lf.logical_form, crossed_features))
-        return cross_featurized_lfs
+    def init_parameters(self):
+        raise NotImplementedError()
 
     # -> List[LogicalForm], torch.tensor
     def lf_logits(self, command):
-        lfs = []
-        activations = []
-        for logical_form, cross_features in self.cross_featurized_lfs(command):
-            lfs.append(logical_form)
-            activations.append(self.linear(cross_features))
-        # flatten's
-        return lfs, torch.stack(activations, dim=0)
+        raise NotImplementedError()
 
     def hashable_state(self, state):
         return tuple(map(tuple, state))
@@ -95,26 +76,35 @@ class Model(object):
 
     def predict(self, state, command):
         # argmax over lfs, not denotations (since argmax over denotations assigns mass to empty stacks; see Wang et al.)
+        if FLAGS.verbose:
+            print(state)
+            print(command)
         lfs, logits = self.lf_logits(command)
         index = logits.argmax()
         lf = lfs[index]
-        return lf.denotation(state)
+        next_state = lf.denotation(state)
+        if FLAGS.verbose:
+            print(lf)
+            print(next_state)
+            print()
+        return next_state
+
+    def loss(self, state, command, target):
+        lfs, logits = self.lf_logits(command)
+        denotation_log_marginals = self.denotation_log_marginals(state, lfs, logits)
+
+        hashable_target = self.hashable_state(target)
+        assert hashable_target in denotation_log_marginals, "{} -> {}: {} | {}".format(state, target, hashable_target, denotation_log_marginals.keys())
+
+        loss = - denotation_log_marginals[hashable_target]
+        loss += self.regularizer_lambda * self.linear.l1_norm()
+        return loss
 
     def optimizer_step(self):
         random.shuffle(self.training_examples)
-        for state, command, target in tqdm.tqdm(self.training_examples, ncols=80):
-            print(command)
+        for state, command, target in self.training_examples:
             self.optimizer.zero_grad()
-
-            lfs, logits = self.lf_logits(command)
-            denotation_log_marginals = self.denotation_log_marginals(state, lfs, logits)
-
-            hashable_target = self.hashable_state(target)
-            assert hashable_target in denotation_log_marginals, (hashable_target, denotation_log_marginals.keys())
-
-            loss = - denotation_log_marginals[hashable_target]
-            loss += self.regularizer_lambda * self.linear.l1_norm()
-
+            loss = self.loss(state, command, target)
             loss.backward()
             self.optimizer.step()
 
@@ -129,7 +119,48 @@ class Model(object):
     def update(self, state, command, target_output, num_updates=None):
         if num_updates is None:
             num_updates = FLAGS.linear_max_updates
+        self.training_examples = []
         self.training_examples.append((state, command, target_output))
         for _ in range(num_updates):
             self.optimizer_step()
 
+class LinearModel(Model):
+    def __init__(self):
+        self.vocab = Vocabulary()
+        self.linear = Sparse2DLinear(
+            self.vocab.feature_index.size(),
+            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
+        ).to(device)
+
+        all_params = list(self.linear.parameters())
+        self.optimizer = optim.Adagrad(all_params)
+        self.training_examples = []
+
+        self.regularizer_lambda = FLAGS.linear_lambda
+
+    def init_parameters(self):
+        self.linear = Sparse2DLinear(
+            self.vocab.feature_index.size(),
+            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
+        ).to(device)
+        self.regularizer_lambda = FLAGS.linear_lambda
+        self.optimizer = optim.Adagrad(self.linear.parameters())
+
+    def search(self, command):
+        command_feature_ids = self.vocab.feature_ids(command)
+        def scoring_function(featurized_logical_form):
+            # featurized_logical_form: FeaturizedLogicalForm
+            cross_features = Counter(itertools.product(command_feature_ids, featurized_logical_form.feature_ids))
+            activation = self.linear(cross_features)
+            return activation
+        return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)
+
+    # -> List[LogicalForm], torch.tensor
+    def lf_logits(self, command):
+        lfs = []
+        activations = []
+        for featurized_logical_form, score in self.search(command):
+            lfs.append(featurized_logical_form.logical_form)
+            activations.append(score)
+        # flatten's
+        return lfs, torch.stack(activations, dim=0)
