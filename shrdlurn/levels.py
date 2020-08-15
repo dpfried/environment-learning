@@ -14,6 +14,7 @@ def random_wall(n_stack_options, height_options, color_options):
 def used_colors(wall):
     return list(set([c for s in wall for c in s]))
 
+# Wang et al. Table 1: with(c)
 def get_stacks_with_color(wall, color):
     result = []
     for i, stack in enumerate(wall):
@@ -21,6 +22,7 @@ def get_stacks_with_color(wall, color):
             result.append(i)
     return result
 
+# Wang et al. Table 1: not(s)
 def complement(wall, stack_idxs):
     result = []
     for i in range(len(wall)):
@@ -28,12 +30,23 @@ def complement(wall, stack_idxs):
             result.append(i)
     return result
 
+def leftmost(wall, stack_idxs):
+    if len(stack_idxs) == 0:
+        return stack_idxs
+    return [min(stack_idxs)]
+
+def rightmost(wall, stack_idxs):
+    if len(stack_idxs) == 0:
+        return stack_idxs
+    return [min(stack_idxs)]
+
 def can_remove(wall, stack_idxs):
     for i in stack_idxs:
         if len(wall[i]) == 0:
             return False
     return True
 
+# Wang et al. Table 1: remove(s)
 def remove_top(wall, stack_idxs):
     result = []
     for i, stack in enumerate(wall):
@@ -46,6 +59,7 @@ def remove_top(wall, stack_idxs):
             result.append(stack)
     return result
 
+# Wang et al. Table 1: add(s, c)
 def stack_on_top(wall, stack_idxs, color):
     new_wall = deepcopy(wall)
     for s in stack_idxs:
