@@ -2,6 +2,7 @@ from typing import Dict, Set, List
 from collections import namedtuple
 import itertools
 import heapq
+import random
 
 from shrdlurn.levels import get_stacks_with_color, complement, leftmost, rightmost, stack_on_top, remove_top
 
@@ -265,8 +266,33 @@ if __name__ == "__main__":
     )
     print(test)
 
-    for depth in range(4):
-        print(f"max depth: {depth}")
-        for feat in test.featurize(depth):
-            print(feat)
-        print()
+    # for depth in range(4):
+    #     print(f"max depth: {depth}")
+    #     for feat in test.featurize(depth):
+    #         print(feat)
+    #     print()
+
+    # beams_by_size = build_all_beams(lambda _: random.random(), pruning_k=10, max_size=5)
+    # for size, beams in beams_by_size.items():
+    #     print(size)
+    #     print(beams)
+    #     print()
+
+    MAX_SIZE = 8
+    MAX_FEATURE_DEPTH = 3
+    beams_by_size = {}
+    features = set()
+    # compute sizes and num features
+    candidate_count = 0
+    for size in range(1, MAX_SIZE+1):
+        extend_beams(beams_by_size, size)
+        old_feature_count = len(features)
+        old_candidate_count = candidate_count
+        for cands in beams_by_size[size].values():
+            for cand in cands:
+                candidate_count += 1
+                for feature_depth in range(MAX_FEATURE_DEPTH + 1):
+                    features.update(cand.featurize(feature_depth))
+        print(f"size {size}")
+        print(f"candidates: {old_candidate_count} -> {candidate_count}")
+        print(f"features: {old_feature_count} -> {len(features)}")
