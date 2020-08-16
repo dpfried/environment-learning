@@ -13,12 +13,13 @@ from vocabulary import Vocabulary
 
 FLAGS = flags.FLAGS
 # TODO: what value did Wang et al. use?
-flags.DEFINE_float('linear_lambda', 0.01, 'l1 penalty lambda')
+flags.DEFINE_float('linear_lambda', 0.001, 'l1 penalty lambda')
 flags.DEFINE_integer('bilinear_embedding_dim', 100, 'embedding dimension')
 flags.DEFINE_integer('linear_max_updates', 1, 'max updates')
 flags.DEFINE_integer('linear_lexical_feature_hash', 0, 'max updates')
 flags.DEFINE_integer('linear_logical_feature_hash', 0, 'max updates')
 flags.DEFINE_integer('denotations_max_beam_size', 100, ' ')
+flags.DEFINE_float('adagrad_initial_lr', 1e-1, 'Adagrad initial learning rate')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -83,11 +84,13 @@ class Model(object):
         denotation_log_marginals = self.denotation_log_marginals(state, lfs, logits)
 
         hashable_target = self.hashable_state(target)
-        assert hashable_target in denotation_log_marginals, "{} -> {}: {} | {}".format(state, target, hashable_target,
-                                                                                       denotation_log_marginals.keys())
-
-        loss = - denotation_log_marginals[hashable_target]
-        loss += self.regularizer()
+        # assert hashable_target in denotation_log_marginals, "{} -> {}: {} | {}".format(state, target, hashable_target,
+        #                                                                                denotation_log_marginals.keys())
+        if hashable_target in denotation_log_marginals:
+            loss = - denotation_log_marginals[hashable_target]
+            loss += self.regularizer()
+        else:
+            loss = torch.tensor(0.0, requires_grad=True).to(device)
         return loss
 
     def optimizer_step(self):
@@ -152,7 +155,7 @@ class LinearModel(Model):
             log_features,
         ).to(device)
         self.regularizer_lambda = FLAGS.linear_lambda
-        self.optimizer = optim.Adagrad(self.linear.parameters())
+        self.optimizer = optim.Adagrad(self.linear.parameters(), lr=FLAGS.adagrad_initial_lr)
         # self.optimizer = optim.Adadelta(self.linear.parameters())
 
     def regularizer(self):
@@ -162,7 +165,7 @@ class LinearModel(Model):
             return 0.0
 
     def search(self, command):
-        command_feature_ids = self.vocab.feature_ids(command)
+        command_feature_ids = self.vocab.feature_ids(command, bos_and_eos=False)
         if FLAGS.linear_lexical_feature_hash > 0:
             command_feature_ids = [fid % FLAGS.linear_lexical_feature_hash for fid in command_feature_ids]
 

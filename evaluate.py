@@ -29,14 +29,18 @@ flags.DEFINE_bool('batch_increasing', False, 'use batch evaluation with larger a
 flags.DEFINE_string('correctness_log', None, 'file to write log indicating which predictions were correct')
 flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactivce debugging)')
 flags.DEFINE_bool('verbose', False, 'print outputs')
+flags.DEFINE_bool('reset_model', True, 'reset the model for each new person')
 
 def evaluate():
     total_correct = 0
     total_examples = 0
     training_accuracies = []
     start_time = datetime.now()
-    for session_id in dataset.get_session_ids():
+    if not FLAGS.reset_model:
         model = Model()
+    for session_id in dataset.get_session_ids():
+        if FLAGS.reset_model:
+            model = Model()
         session_correct = 0
         session_examples = 0
         session_correct_list = []
@@ -117,6 +121,7 @@ if __name__ == '__main__':
     print(sys.argv)
     FLAGS(sys.argv)
     dataset.load()
+    print("reset model: {}".format(FLAGS.reset_model))
     if not FLAGS.sandbox:
         if FLAGS.linear:
             Model = linear_model.LinearModel

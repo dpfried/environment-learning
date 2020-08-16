@@ -70,8 +70,8 @@ class Vocabulary(object):
         for feature, count in feature_count.most_common():
             self.feature_index.index(feature)
 
-        print("vocab index size: {}".format(self.vocab_index.size()))
-        print("feature index size: {}".format(self.feature_index.size()))
+        # print("vocab index size: {}".format(self.vocab_index.size()))
+        # print("feature index size: {}".format(self.feature_index.size()))
 
         self.vocab_index.frozen = True
         self.feature_index.frozen = True
@@ -85,17 +85,19 @@ class Vocabulary(object):
                       for token in tokens]
         return tokens
 
-    def raw_features(self, language):
+    def raw_features(self, language, bos_and_eos=True):
         # unigrams, bigrams, trigrams, skip-trigrams (from Wang et al.)
         tokens = self.raw_tokens(language)
+        if not bos_and_eos:
+            tokens = tokens[1:-1]
         for token in tokens:
             yield (token, )
         yield from zip(tokens, tokens[1:])
         yield from zip(tokens, tokens[1:], tokens[2:])
         yield from ((a, None, b) for a, b in zip(tokens, tokens[2:]))
 
-    def feature_ids(self, language):
-        return [self.feature_index.index(feat) for feat in self.raw_features(language)]
+    def feature_ids(self, language, bos_and_eos=True):
+        return [self.feature_index.index(feat) for feat in self.raw_features(language, bos_and_eos)]
 
     def token_ids(self, language, bos_and_eos=True):
         tokens = [self.vocab_index.index(t) for t in self.raw_tokens(language)]
