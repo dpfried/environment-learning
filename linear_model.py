@@ -1,50 +1,27 @@
-import numpy as np
-import random
 import itertools
+import random
+from collections import Counter, defaultdict
 
-import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
+import tqdm
+from absl import flags
 
 import dataset
 from vocabulary import Vocabulary
-import message_flags
-import discrete_util
 
-from collections import Counter, defaultdict
-
-from absl import flags
 FLAGS = flags.FLAGS
 # TODO: what value did Wang et al. use?
 flags.DEFINE_float('linear_lambda', 0.01, 'l1 penalty lambda')
+flags.DEFINE_integer('bilinear_embedding_dim', 100, 'embedding dimension')
 flags.DEFINE_integer('linear_max_updates', 1, 'max updates')
+flags.DEFINE_integer('linear_lexical_feature_hash', 0, 'max updates')
+flags.DEFINE_integer('linear_logical_feature_hash', 0, 'max updates')
 flags.DEFINE_integer('denotations_max_beam_size', 100, ' ')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-class Sparse2DLinear(nn.Module):
-    def __init__(self, num_a_features, num_b_features):
-        super().__init__()
-        self.num_a_features = num_a_features
-        self.num_b_features = num_b_features
-        self.coefficients = nn.Parameter(
-            torch.zeros(
-                self.num_a_features, self.num_b_features
-            )
-        )
-
-    def l1_norm(self):
-        return self.coefficients.flatten().norm(p=1)
-
-    def forward(self, feat_dict):
-        activation = torch.tensor(0.0, requires_grad=True)
-        for (a_index, b_index), value in feat_dict.items():
-            assert 0 <= a_index < self.num_a_features
-            assert 0 <= b_index < self.num_b_features
-            activation = activation + self.coefficients[a_index, b_index] * value
-        return activation
 
 class Model(object):
     def __init__(self):
@@ -55,8 +32,7 @@ class Model(object):
     def init_parameters(self):
         raise NotImplementedError()
 
-    # -> List[LogicalForm], torch.tensor
-    def lf_logits(self, command):
+    def search(self, command):
         raise NotImplementedError()
 
     def hashable_state(self, state):
@@ -79,6 +55,7 @@ class Model(object):
         if FLAGS.verbose:
             print(state)
             print(command)
+            print(self.vocab.raw_tokens(command))
         lfs, logits = self.lf_logits(command)
         index = logits.argmax()
         lf = lfs[index]
@@ -89,15 +66,28 @@ class Model(object):
             print()
         return next_state
 
+    # -> List[LogicalForm], torch.tensor
+    def lf_logits(self, command):
+        lfs = []
+        activations = []
+        for featurized_logical_form, score in self.search(command):
+            lfs.append(featurized_logical_form.logical_form)
+            activations.append(score)
+        return lfs, torch.stack(activations, dim=0)
+
+    def regularizer(self):
+        raise NotImplementedError()
+
     def loss(self, state, command, target):
         lfs, logits = self.lf_logits(command)
         denotation_log_marginals = self.denotation_log_marginals(state, lfs, logits)
 
         hashable_target = self.hashable_state(target)
-        assert hashable_target in denotation_log_marginals, "{} -> {}: {} | {}".format(state, target, hashable_target, denotation_log_marginals.keys())
+        assert hashable_target in denotation_log_marginals, "{} -> {}: {} | {}".format(state, target, hashable_target,
+                                                                                       denotation_log_marginals.keys())
 
         loss = - denotation_log_marginals[hashable_target]
-        loss += self.regularizer_lambda * self.linear.l1_norm()
+        loss += self.regularizer()
         return loss
 
     def optimizer_step(self):
@@ -121,46 +111,123 @@ class Model(object):
             num_updates = FLAGS.linear_max_updates
         self.training_examples = []
         self.training_examples.append((state, command, target_output))
-        for _ in range(num_updates):
+        it = range(num_updates)
+        if num_updates > 1:
+            it = tqdm.tqdm(it, ncols=80)
+        for _ in it:
             self.optimizer_step()
 
+
+class Sparse2DLinear(nn.Module):
+    def __init__(self, num_a_features, num_b_features):
+        super().__init__()
+        self.num_a_features = num_a_features
+        self.num_b_features = num_b_features
+        self.coefficients = nn.Parameter(
+            torch.FloatTensor(
+                self.num_a_features, self.num_b_features
+            )
+        )
+
+    def l1_norm(self):
+        return self.coefficients.norm(p=1)
+
+    def forward(self, feat_dict):
+        activation = torch.tensor(0.0, requires_grad=True)
+        for (a_index, b_index), value in feat_dict.items():
+            assert 0 <= a_index < self.num_a_features
+            assert 0 <= b_index < self.num_b_features
+            activation = activation + self.coefficients[a_index, b_index] * value
+        return activation
+
+
 class LinearModel(Model):
-    def __init__(self):
-        self.vocab = Vocabulary()
-        self.linear = Sparse2DLinear(
-            self.vocab.feature_index.size(),
-            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
-        ).to(device)
-
-        all_params = list(self.linear.parameters())
-        self.optimizer = optim.Adagrad(all_params)
-        self.training_examples = []
-
-        self.regularizer_lambda = FLAGS.linear_lambda
-
     def init_parameters(self):
+        if FLAGS.linear_lexical_feature_hash > 0:
+            lex_features = FLAGS.linear_lexical_feature_hash
+        else:
+            lex_features = self.vocab.feature_index.size()
+        if FLAGS.linear_logical_feature_hash > 0:
+            log_features = FLAGS.linear_logical_feature_hash
+        else:
+            log_features = dataset.LOGICAL_FORM_FEATURE_INDEX.size()
+
         self.linear = Sparse2DLinear(
-            self.vocab.feature_index.size(),
-            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
+            lex_features,
+            log_features,
         ).to(device)
         self.regularizer_lambda = FLAGS.linear_lambda
         self.optimizer = optim.Adagrad(self.linear.parameters())
+        # self.optimizer = optim.Adadelta(self.linear.parameters())
+
+    def regularizer(self):
+        return self.regularizer_lambda * self.linear.l1_norm()
 
     def search(self, command):
         command_feature_ids = self.vocab.feature_ids(command)
+        if FLAGS.linear_lexical_feature_hash > 0:
+            command_feature_ids = [fid % FLAGS.linear_lexical_feature_hash for fid in command_feature_ids]
+
         def scoring_function(featurized_logical_form):
             # featurized_logical_form: FeaturizedLogicalForm
-            cross_features = Counter(itertools.product(command_feature_ids, featurized_logical_form.feature_ids))
+            log_feature_ids = featurized_logical_form.feature_ids
+            if FLAGS.linear_logical_feature_hash > 0:
+                log_feature_ids = [fid % FLAGS.linear_logical_feature_hash for fid in log_feature_ids]
+
+            cross_features = Counter(itertools.product(command_feature_ids, log_feature_ids))
             activation = self.linear(cross_features)
             return activation
+
         return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)
 
-    # -> List[LogicalForm], torch.tensor
-    def lf_logits(self, command):
-        lfs = []
-        activations = []
-        for featurized_logical_form, score in self.search(command):
-            lfs.append(featurized_logical_form.logical_form)
-            activations.append(score)
-        # flatten's
-        return lfs, torch.stack(activations, dim=0)
+
+class BilinearEmbedding(nn.Module):
+    def __init__(self, num_a_features, num_b_features):
+        super().__init__()
+        self.num_a_features = num_a_features
+        self.num_b_features = num_b_features
+        self.a_embeddings = nn.Embedding(num_a_features, FLAGS.bilinear_embedding_dim)
+        self.b_embeddings = nn.Embedding(num_b_features, FLAGS.bilinear_embedding_dim)
+        # don't really need this (won't use the bias), but use it for the initializer
+        self.bilinear = nn.Bilinear(
+            FLAGS.bilinear_embedding_dim,
+            FLAGS.bilinear_embedding_dim,
+            1
+        )
+
+    def forward_partial(self, a_feat_ids):
+        a_feat_ids = torch.LongTensor(a_feat_ids).to(device)
+        # emb_dim
+        a_embs = self.a_embeddings(a_feat_ids).sum(0)
+        inner = torch.einsum("oxy,x->oy", (self.bilinear.weight, a_embs))
+
+        def forward(b_feat_ids):
+            b_feat_ids = torch.LongTensor(b_feat_ids).to(device)
+            b_embs = self.b_embeddings(b_feat_ids).sum(0)
+            activation = torch.einsum("oy,y->o", (inner, b_embs)).squeeze(0)
+            return activation
+
+        return forward
+
+
+class BilinearEmbeddingModel(Model):
+    def init_parameters(self):
+        self.bilinear = BilinearEmbedding(
+            self.vocab.vocab_index.size(),
+            dataset.LOGICAL_FORM_FEATURE_INDEX.size()
+        ).to(device)
+        self.optimizer = optim.Adam(self.bilinear.parameters())
+
+    def regularizer(self):
+        return 0.0
+
+    def search(self, command):
+        command_feature_ids = self.vocab.token_ids(command, bos_and_eos=False)
+        forward = self.bilinear.forward_partial(command_feature_ids)
+
+        def scoring_function(featurized_logical_form):
+            # featurized_logical_form: FeaturizedLogicalForm
+            activation = forward(featurized_logical_form.feature_ids)
+            return activation
+
+        return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)

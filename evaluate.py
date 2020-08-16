@@ -2,16 +2,26 @@ from datetime import datetime
 import numpy as np
 import sys
 
+from absl import flags
+FLAGS = flags.FLAGS
+#
+# def del_all_flags(FLAGS):
+#     flags_dict = FLAGS._flags()
+#     keys_list = [keys for keys in flags_dict]
+#     for keys in keys_list:
+#         FLAGS.__delattr__(keys)
+#
+# del_all_flags(FLAGS)
+
 import pretrain
 import model as our_model
 import baseline_model
 import linear_model
 import dataset
 
-from absl import flags
-FLAGS = flags.FLAGS
 flags.DEFINE_bool('baseline', False, 'use baseline model')
 flags.DEFINE_bool('linear', False, 'use linear model')
+flags.DEFINE_bool('bilinear', False, 'use linear model')
 flags.DEFINE_bool('batch', False, 'use batch evaluation (only supported with some datasets)')
 flags.DEFINE_bool('batch_increasing', False, 'use batch evaluation with larger and larger data sizes')
 flags.DEFINE_string('correctness_log', None, 'file to write log indicating which predictions were correct')
@@ -41,12 +51,14 @@ def evaluate():
             
             model.update(state, language, target_output)
             training_accuracies.append(model.training_accuracy())
+            # if session_examples > 2:
+            #     return
 
         if FLAGS.correctness_log is not None:
             with open(FLAGS.correctness_log, 'a') as f:
                 f.write(' '.join(str(c) for c in session_correct_list) + '\n')
 
-        print(datetime.now()-start_time, session_id, session_correct/session_examples)
+        print("this accuracy: {} {} {}".format(datetime.now()-start_time, session_id, session_correct/session_examples))
         total_correct += session_correct
         total_examples += session_examples
 
@@ -62,7 +74,7 @@ def evaluate_batch(data_size, test_size=500):
         for state, language, target_output in session_data[:data_size]:
             model.update(state, language, target_output, 0)
 
-        if not FLAGS.linear:
+        if not (FLAGS.linear):
             for i in range(50):
                 model.optimizer_step()
 
@@ -92,6 +104,9 @@ if __name__ == '__main__':
     if not FLAGS.sandbox:
         if FLAGS.linear:
             Model = linear_model.LinearModel
+            assert not FLAGS.baseline
+        elif FLAGS.bilinear:
+            Model = linear_model.BilinearEmbeddingModel
             assert not FLAGS.baseline
         elif FLAGS.baseline:
             Model = baseline_model.Model
