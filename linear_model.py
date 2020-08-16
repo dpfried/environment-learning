@@ -33,6 +33,9 @@ class Model(object):
     def init_parameters(self):
         raise NotImplementedError()
 
+    def parameters(self):
+        raise NotImplementedError()
+
     def search(self, command):
         raise NotImplementedError()
 
@@ -88,9 +91,14 @@ class Model(object):
         #                                                                                denotation_log_marginals.keys())
         if hashable_target in denotation_log_marginals:
             loss = - denotation_log_marginals[hashable_target]
-            loss += self.regularizer()
+            reg = self.regularizer()
+            if FLAGS.verbose:
+                print("loss: {:.4f}".format(loss))
+                print("regularizer: {:.4f}".format(reg))
+            loss += reg
         else:
             loss = torch.tensor(0.0, requires_grad=True).to(device)
+
         return loss
 
     def optimizer_step(self):
@@ -127,9 +135,7 @@ class Sparse2DLinear(nn.Module):
         self.num_a_features = num_a_features
         self.num_b_features = num_b_features
         self.coefficients = nn.Parameter(
-            torch.FloatTensor(
-                self.num_a_features, self.num_b_features
-            )
+            torch.zeros((self.num_a_features, self.num_b_features))
         )
 
     def l1_norm(self):
@@ -155,8 +161,11 @@ class LinearModel(Model):
             log_features,
         ).to(device)
         self.regularizer_lambda = FLAGS.linear_lambda
-        self.optimizer = optim.Adagrad(self.linear.parameters(), lr=FLAGS.adagrad_initial_lr)
+        self.optimizer = optim.Adagrad(self.parameters(), lr=FLAGS.adagrad_initial_lr)
         # self.optimizer = optim.Adadelta(self.linear.parameters())
+
+    def parameters(self):
+        return self.linear.parameters()
 
     def regularizer(self):
         if self.regularizer_lambda != 0.0:
@@ -221,7 +230,11 @@ class BilinearEmbeddingModel(Model):
             self.vocab.vocab_index.size(),
             dataset.LOGICAL_FORM_FEATURE_INDEX.size()
         ).to(device)
-        self.optimizer = optim.Adam(self.bilinear.parameters())
+        self.optimizer = optim.Adam(self.parameters())
+
+
+    def parameters(self):
+        return self.bilinear.parameters()
 
     def regularizer(self):
         return 0.0

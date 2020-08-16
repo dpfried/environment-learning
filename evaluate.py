@@ -31,6 +31,8 @@ flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactivce debuggi
 flags.DEFINE_bool('verbose', False, 'print outputs')
 flags.DEFINE_bool('reset_model', True, 'reset the model for each new person')
 
+flags.DEFINE_string('filter_session', None, 'if passed, only run on this session')
+
 def evaluate():
     total_correct = 0
     total_examples = 0
@@ -39,6 +41,8 @@ def evaluate():
     if not FLAGS.reset_model:
         model = Model()
     for session_id in dataset.get_session_ids():
+        if FLAGS.filter_session is not None and session_id != FLAGS.filter_session:
+            continue
         if FLAGS.reset_model:
             model = Model()
         session_correct = 0
