@@ -311,15 +311,18 @@ if __name__ == "__main__":
     features = set()
     # compute sizes and num features
     candidate_count = 0
+    executable_candidate_count = 0
     for size in range(1, MAX_SIZE+1):
         extend_beams(beams_by_size, size)
         old_feature_count = len(features)
         old_candidate_count = candidate_count
         for cands in beams_by_size[size].values():
-            for cand in cands:
+            for cand, score in cands:
                 candidate_count += 1
-                for feature_depth in range(MAX_FEATURE_DEPTH + 1):
-                    features.update(cand.featurize_single_depth(feature_depth))
+                if cand.logical_form.return_type == "act":
+                    executable_candidate_count += 1
+                features.update(cand.logical_form.featurize())
         print(f"size {size}")
+        print(f"executable candidates: {executable_candidate_count}")
         print(f"candidates: {old_candidate_count} -> {candidate_count}")
         print(f"features: {old_feature_count} -> {len(features)}")

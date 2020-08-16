@@ -132,13 +132,8 @@ class Sparse2DLinear(nn.Module):
     def l1_norm(self):
         return self.coefficients.norm(p=1)
 
-    def forward(self, feat_dict):
-        activation = torch.tensor(0.0, requires_grad=True)
-        for (a_index, b_index), value in feat_dict.items():
-            assert 0 <= a_index < self.num_a_features
-            assert 0 <= b_index < self.num_b_features
-            activation = activation + self.coefficients[a_index, b_index] * value
-        return activation
+    def forward(self, a_indices, b_indices):
+        return self.coefficients[a_indices][:,b_indices].sum()
 
 
 class LinearModel(Model):
@@ -161,12 +156,17 @@ class LinearModel(Model):
         # self.optimizer = optim.Adadelta(self.linear.parameters())
 
     def regularizer(self):
-        return self.regularizer_lambda * self.linear.l1_norm()
+        if self.regularizer_lambda != 0.0:
+            return self.regularizer_lambda * self.linear.l1_norm()
+        else:
+            return 0.0
 
     def search(self, command):
         command_feature_ids = self.vocab.feature_ids(command)
         if FLAGS.linear_lexical_feature_hash > 0:
             command_feature_ids = [fid % FLAGS.linear_lexical_feature_hash for fid in command_feature_ids]
+
+        command_feature_ids = torch.LongTensor(command_feature_ids).to(device)
 
         def scoring_function(featurized_logical_form):
             # featurized_logical_form: FeaturizedLogicalForm
@@ -174,11 +174,13 @@ class LinearModel(Model):
             if FLAGS.linear_logical_feature_hash > 0:
                 log_feature_ids = [fid % FLAGS.linear_logical_feature_hash for fid in log_feature_ids]
 
-            cross_features = Counter(itertools.product(command_feature_ids, log_feature_ids))
-            activation = self.linear(cross_features)
+            log_feature_ids = torch.LongTensor(log_feature_ids).to(device)
+            activation = self.linear(command_feature_ids, log_feature_ids)
             return activation
 
         return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)
+        # scored = [(flf, scoring_function(flf)) for flf, _ in dataset.FEATURIZED_LOGICAL_FORMS]
+        # return scored
 
 
 class BilinearEmbedding(nn.Module):

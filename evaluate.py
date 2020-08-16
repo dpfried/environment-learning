@@ -2,6 +2,8 @@ from datetime import datetime
 import numpy as np
 import sys
 
+import tqdm
+
 from absl import flags
 FLAGS = flags.FLAGS
 #
@@ -39,7 +41,21 @@ def evaluate():
         session_examples = 0
         session_correct_list = []
 
-        for state, language, target_output in dataset.get_session_data(session_id):
+        session_data = list(dataset.get_session_data(session_id))
+
+        if not FLAGS.verbose:
+            session_data = tqdm.tqdm(session_data, ncols=80, desc=session_id)
+
+        for example_ix, (state, language, target_output) in enumerate(session_data):
+            acc = session_correct / session_examples if session_examples > 0 else 0
+            if FLAGS.verbose:
+                print("{}: {} / {}\tacc: {:.4f}".format(
+                    session_id, example_ix, len(session_data),
+                    acc
+                ))
+            else:
+                session_data.set_postfix({'acc': acc})
+
             predicted = model.predict(state, language)
 
             if predicted == target_output:
