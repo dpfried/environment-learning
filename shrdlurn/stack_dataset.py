@@ -19,8 +19,9 @@ def get_session_ids():
         for line in f:
             yield line.strip()
 
-def get_session_data(sess_id):
+def get_session_data(sess_id, max_instances=None):
     filename = path.join('shrdlurn/turk_logs', sess_id+'.lisp')
+    instance_count = 0
     with open(filename) as f:
         for expression in parse_lisp.parse_multiple(f.read()):
             assert expression[0] == 'example'
@@ -37,7 +38,10 @@ def get_session_data(sess_id):
 
             start_state = json.loads(context_graph[2][0][1])
             target_state = json.loads(target)
+            if max_instances is not None and instance_count >= max_instances:
+                break
             yield start_state, utterance, target_state
+            instance_count += 1
 
 def _state_to_matrix(state, height=None):
     if height is None:

@@ -27,7 +27,7 @@ flags.DEFINE_bool('bilinear', False, 'use linear model')
 flags.DEFINE_bool('batch', False, 'use batch evaluation (only supported with some datasets)')
 flags.DEFINE_bool('batch_increasing', False, 'use batch evaluation with larger and larger data sizes')
 flags.DEFINE_string('correctness_log', None, 'file to write log indicating which predictions were correct')
-flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactivce debugging)')
+flags.DEFINE_bool('sandbox', False, 'do nothing (useful for interactive debugging)')
 flags.DEFINE_bool('verbose', False, 'print outputs')
 flags.DEFINE_bool('reset_model', True, 'reset the model for each new person')
 

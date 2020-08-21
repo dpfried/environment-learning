@@ -18,7 +18,8 @@ _sessions = pickle.load(open('regexp/regex_sessions_med.p','rb'))
 def get_session_ids():
     return range(len(_sessions))
 
-def get_session_data(session_id):
+def get_session_data(session_id, max_instances=None):
+    instance_count = 0
     if session_id in ['train','test']:
         for annotation in _corpus[session_id]:
             examples = annotation['examples']
@@ -28,10 +29,16 @@ def get_session_data(session_id):
                 if original == result:
                     continue # don't include no-effect examples
                 # stripping off of begin and end tokens
+                if max_instances and instance_count >= max_instances:
+                    break
                 yield original[1:-1], text, result[1:-1]
+                instance_count += 1
     else:
         for original, text, result in _sessions[session_id]:
+            if max_instances and instance_count >= max_instances:
+                break
             yield original, text, result
+            instance_count += 1
 
 def state_to_variable(state):
     char_ids = [ord(c)-97 for c in state]

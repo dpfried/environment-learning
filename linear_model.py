@@ -1,7 +1,7 @@
-import itertools
 import random
-from collections import Counter, defaultdict
+from collections import defaultdict
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -103,11 +103,14 @@ class Model(object):
 
     def optimizer_step(self):
         random.shuffle(self.training_examples)
+        losses = []
         for state, command, target in self.training_examples:
             self.optimizer.zero_grad()
             loss = self.loss(state, command, target)
             loss.backward()
+            losses.append(loss.item())
             self.optimizer.step()
+        return losses
 
     def training_accuracy(self):
         n_correct = 0
@@ -126,7 +129,8 @@ class Model(object):
         if num_updates > 1:
             it = tqdm.tqdm(it, ncols=80)
         for _ in it:
-            self.optimizer_step()
+            losses = self.optimizer_step()
+        return np.mean(losses)
 
 
 class Sparse2DLinear(nn.Module):
@@ -142,7 +146,7 @@ class Sparse2DLinear(nn.Module):
         return self.coefficients.norm(p=1)
 
     def forward(self, a_indices, b_indices):
-        return self.coefficients[a_indices][:,b_indices].sum()
+        return self.coefficients[a_indices][:, b_indices].sum()
 
 
 class LinearModel(Model):
@@ -231,7 +235,6 @@ class BilinearEmbeddingModel(Model):
             dataset.LOGICAL_FORM_FEATURE_INDEX.size()
         ).to(device)
         self.optimizer = optim.Adam(self.parameters())
-
 
     def parameters(self):
         return self.bilinear.parameters()
