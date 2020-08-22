@@ -19,7 +19,10 @@ flags.DEFINE_integer('linear_max_updates', 1, 'max updates')
 flags.DEFINE_integer('linear_lexical_feature_hash', 0, 'max updates')
 flags.DEFINE_integer('linear_logical_feature_hash', 0, 'max updates')
 flags.DEFINE_integer('denotations_max_beam_size', 100, ' ')
+flags.DEFINE_enum('linear_optimizer', 'adagrad', ['adagrad', 'sgd'], 'optimizer to use')
 flags.DEFINE_float('adagrad_initial_lr', 1e-1, 'Adagrad initial learning rate')
+flags.DEFINE_float('sgd_lr', 1e-1, 'sgd learning rate')
+flags.DEFINE_bool('linear_no_search', False, 'marginalize over all consistent logical forms (no beam search)')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -165,8 +168,12 @@ class LinearModel(Model):
             log_features,
         ).to(device)
         self.regularizer_lambda = FLAGS.linear_lambda
-        self.optimizer = optim.Adagrad(self.parameters(), lr=FLAGS.adagrad_initial_lr)
-        # self.optimizer = optim.Adadelta(self.linear.parameters())
+        if FLAGS.linear_optimizer == 'adagrad':
+            self.optimizer = optim.Adagrad(self.parameters(), lr=FLAGS.adagrad_initial_lr)
+        elif FLAGS.linear_optimizer == 'sgd':
+            self.optimizer = optim.SGD(self.parameters(), lr=FLAGS.sgd_lr)
+        else:
+            raise ValueError(f"--linear_optimizer={FLAGS.linear_optimizer}")
 
     def parameters(self):
         return self.linear.parameters()
@@ -194,9 +201,11 @@ class LinearModel(Model):
             activation = self.linear(command_feature_ids, log_feature_ids)
             return activation
 
-        return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)
-        # scored = [(flf, scoring_function(flf)) for flf, _ in dataset.FEATURIZED_LOGICAL_FORMS]
-        # return scored
+        if FLAGS.linear_no_search:
+            scored = [(flf, scoring_function(flf)) for flf, _ in dataset.FEATURIZED_LOGICAL_FORMS]
+            return scored
+        else:
+            return dataset.search_over_lfs(scoring_function, FLAGS.denotations_max_beam_size)
 
 
 class BilinearEmbedding(nn.Module):
