@@ -289,6 +289,7 @@ LOGICAL_FORM_FEATURE_INDEX = Index()
 FEATURIZED_LOGICAL_FORMS = list(search_over_lfs(None, None))
 LOGICAL_FORM_FEATURE_INDEX.frozen = True
 
+
 if __name__ == "__main__":
     test = Add(
         Not(Leftmost(With(Brown()))),

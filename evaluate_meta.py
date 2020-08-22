@@ -27,6 +27,7 @@ flags.DEFINE_integer('limit_sessions', None, 'max number of sessions')
 flags.DEFINE_integer('limit_instances', None, 'max number of instances per session')
 flags.DEFINE_float('reptile_beta', 0.1, 'reptile outer step size')
 flags.DEFINE_float('reptile_meta_batch_size', 1, 'number of sessions to use in batched reptile update')
+flags.DEFINE_bool('reptile_anneal_beta', False, 'decrease reptile_beta to 0 over the course of multi_epochs')
 
 
 def train_multi(model, train_session_ids, val_session_ids):
@@ -111,6 +112,13 @@ def train_unmixed(model, train_session_ids, val_session_ids, updates='multi'):
         rng.shuffle(train_session_ids)
         train_stats = defaultdict(list)
 
+        if updates == 'reptile':
+            if FLAGS.reptile_anneal_beta:
+                reptile_beta = np.linspace(FLAGS.reptile_beta, 0, FLAGS.multi_epochs)[epoch]
+            else:
+                reptile_beta = FLAGS.reptile_beta
+            print(f'epoch {epoch}: reptile_beta {reptile_beta}')
+
         reptile_session_params = []
         for session_ix, session_id in enumerate(tqdm.tqdm(train_session_ids, ncols=80, desc=f'epoch {epoch}')):
             if updates == 'multi':
@@ -134,7 +142,7 @@ def train_unmixed(model, train_session_ids, val_session_ids, updates='multi'):
                 interpolated = interpolate_parameters(
                     model.linear.named_parameters(),
                     averaged,
-                    FLAGS.reptile_beta,
+                    reptile_beta,
                 )
                 update_parameters(model.linear, interpolated)
                 reptile_session_params = []
@@ -225,6 +233,7 @@ def evaluate_meta():
         model = train_unmixed(model, train_session_ids, val_session_ids, updates='reptile')
     elif FLAGS.training == 'none':
         pass
+        val_stats = test_sessions(model, val_session_ids, name='val')
     test_stats = test_sessions(model, test_session_ids, name='test')
     # pprint.pprint(test_stats)
 
